@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>UPCL Alerts — Bill Upload (Unofficial)</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- CSV parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" defer></script>
+
+  <!-- PDF.js (UMD build + worker) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.min.js"></script>
+  <script>
+    // Configure PDF.js worker
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.worker.min.js";
+    }
+  </script>
+
+  <style>
+    .card{background:rgba(255,255,255,.98);border:1px solid rgba(226,232,240,.9);border-radius:16px;box-shadow:0 10px 25px -10px rgba(2,6,23,.15)}
+    .hint{font-size:.8rem;color:#64748b}
+  </style>
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-800">
+  <!-- Header -->
+  <header class="bg-indigo-600 text-white">
+    <div class="max-w-5xl mx-auto px-4 py-6">
+      <h1 class="text-2xl font-bold">UPCL Alerts — Bill Upload (Unofficial)</h1>
+      <p class="opacity-90 text-sm mt-1">
+        Upload your last 3–4 UPCL bills (PDF/CSV). We’ll estimate your average daily use and send SMS/Voice alerts when the predicted usage crosses 50, 100, 150… units.
+      </p>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <main class="max-w-5xl mx-auto px-4 py-6 space-y-6">
+    <!-- Preferences -->
+    <section class="card p-5">
+      <h2 class="text-xl font-semibold mb-3">1) Your Preferences</h2>
+      <div class="grid md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-sm font-medium">Phone (10-digit)</label>
+          <input id="phone" type="tel" maxlength="10" class="mt-1 w-full border rounded-lg px-3 py-2" placeholder="98XXXXXXXX" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium">Preferred Language</label>
+          <select id="lang" class="mt-1 w-full border rounded-lg px-3 py-2">
+            <option value="en">English</option>
+            <option value="hi">Hindi (हिन्दी)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium">Channel</label>
+          <select id="channel" class="mt-1 w-full border rounded-lg px-3 py-2">
+            <option value="sms">SMS</option>
+            <option value="voice">Voice Call</option>
+            <option value="both">Both</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium">UPCL Account No (optional)</label>
+          <input id="account" type="text" class="mt-1 w-full border rounded-lg px-3 py-2" placeholder="(for your reference)" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium">Cycle Start Date (this month)</label>
+          <input id="cycleStart" type="date" class="mt-1 w-full border rounded-lg px-3 py-2" />
+        </div>
+      </div>
+      <div class="flex items-center gap-3 mt-3">
+        <input id="consent" type="checkbox" class="h-4 w-4" />
+        <label for="consent" class="text-sm">I agree to receive alerts. This is an unofficial tool (no UPCL login required).</label>
+      </div>
+    </section>
+
+    <!-- Upload & Extract -->
+    <section class="card p-5">
+      <h2 class="text-xl font-semibold mb-3">2) Upload Bills (PDF or CSV)</h2>
+      <input id="files" type="file" accept="application/pdf,.csv" multiple class="block w-full text-sm" />
+      <p class="hint mt-2">Tip: Prefer original e-bills (text PDFs). Scanned image PDFs may not parse well.</p>
+
+      <div class="mt-4 flex gap-2">
+        <button id="btnParse" class="px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700">Extract Usage</button>
+        <button id="btnClear" class="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300">Clear</button>
+      </div>
+
+      <!-- Preview -->
+      <div id="preview" class="mt-5 hidden">
+        <h3 class="font-semibold mb-2">Parsed History (editable)</h3>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm border">
+            <thead class="bg-slate-100">
+              <tr>
+                <th class="px-2 py-1 border">Period Start</th>
+                <th class="px-2 py-1 border">Period End</th>
+                <th class="px-2 py-1 border">Units (kWh)</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+
+        <p id="avgInfo" class="mt-2 text-sm"></p>
+
+        <div class="mt-4">
+          <h4 class="font-semibold">Predicted crossing dates (next 400 units)</h4>
+          <ul id="predList" class="list-disc pl-6 text-sm"></ul>
+        </div>
+
+        <div class="mt-4 flex flex-wrap gap-2">
+          <button id="btnRegister" class="px-4 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700">Enable Alerts</button>
+          <button id="btnDownloadCSV" class="px-4 py-2 rounded-xl bg-sky-600 text-white hover:bg-sky-700">Download Parsed CSV</button>
+        </div>
+        <p id="status" class="mt-2 text-sm"></p>
+      </div>
+    </section>
+
+    <p class="hint">
+      Not affiliated with UPCL. We do not upload your PDFs—extraction happens in your browser; only the summarized history you approve is sent to the backend.
+    </p>
+  </main>
+
+  <script>
+    // ====== CONFIG: replace with your Apps Script Web App URL ======
+    const API = "YOUR_APPS_SCRIPT_WEB_APP_URL";
+
+    // ====== Small helpers ======
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+    function toast(el, msg, ok = true){
+      el.textContent = msg;
+      el.className = ok ? "mt-2 text-sm text-emerald-700" : "mt-2 text-sm text-rose-700";
+    }
+    async function postJSON(payload){
+      const res = await fetch(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if(!res.ok) throw new Error(await res.text());
+      return res.json();
+    }
+    function daysBetween(a,b){
+      const A=new Date(a), B=new Date(b);
+      return Math.max(1, Math.round((B-A)/(1000*60*60*24))+1);
+    }
+    function formatDateISO(d){
+      const x = new Date(d);
+      const z = new Date(Date.UTC(x.getFullYear(), x.getMonth(), x.getDate()));
+      return z.toISOString().slice(0,10);
+    }
+
+    // ====== PDF parsing ======
+    async function pdfToText(file){
+      const buf = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+      let out = "";
+      for(let i=1;i<=pdf.numPages;i++){
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        out += content.items.map(it => it.str).join("\n") + "\n";
+      }
+      return out;
+    }
+
+    // Try multiple patterns to extract period + units from a bill text
+    function parseBillText(txt){
+      const text = txt.replace(/\r/g," ").replace(/\n+/g," ").replace(/\s{2,}/g," ").trim();
+
+      // Units patterns (try many labels commonly seen)
+      const unitPatterns = [
+        /(Units\s*Consumed|Billed\s*Units|Total\s*Units|Total\s*Consumption|Consumption|Energy\s*Units)\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)/i,
+        /\bUnits\s*\(kWh\)\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)/i
+      ];
+
+      let units = null;
+      for(const re of unitPatterns){
+        const m = text.match(re);
+        if(m){
+          units = parseFloat(m[m.length-1]);
+          if(!Number.isNaN(units)) break;
+        }
+      }
+
+      // Period patterns: dd/mm/yyyy to dd/mm/yyyy OR with dashes; or "01 May 2025 - 31 May 2025"
+      let start=null, end=null;
+      const reDMY = /([0-3]?\d[\/\-][0-1]?\d[\/\-]\d{4})\s*(?:to|\-|–|—)\s*([0-3]?\d[\/\-][0-1]?\d[\/\-]\d{4})/i;
+      const m1 = text.match(reDMY);
+      if(m1){ start = m1[1]; end = m1[2]; }
+      if(!start){
+        const reMon = /(\d{1,2}\s*(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s*\d{4})\s*(?:to|\-|–|—)\s*(\d{1,2}\s*(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?)\s*\d{4})/i;
+        const m2 = text.match(reMon);
+        if(m2){ start = m2[1]; end = m2[3]; }
+      }
+
+      return (units && start && end) ? [{ start, end, units }] : [];
+    }
+
+    // CSV parsing (header-based heuristic)
+    function parseCSV(text){
+      const out = [];
+      const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+      if(!parsed.data || !parsed.data.length) return out;
+      const headers = Object.keys(parsed.data[0]).map(h => h.toLowerCase());
+      const idxStart = headers.findIndex(h => /start|from/.test(h));
+      const idxEnd   = headers.findIndex(h => /end|to/.test(h));
+      const idxUnits = headers.findIndex(h => /units|kwh|consumption/.test(h));
+      for(const row of parsed.data){
+        const arr = Object.values(row);
+        const start = arr[idxStart];
+        const end   = arr[idxEnd];
+        const units = parseFloat(arr[idxUnits]);
+        if(start && end && !isNaN(units)) out.push({ start, end, units });
+      }
+      return out;
+    }
+
+    // Average daily usage
+    function avgDaily(history){
+      let totalUnits = 0, totalDays = 0;
+      history.forEach(h => {
+        const u = Number(h.units)||0;
+        const d = daysBetween(h.start, h.end);
+        totalUnits += u;
+        totalDays  += d;
+      });
+      return totalDays > 0 ? totalUnits / totalDays : 0;
+    }
+
+    // Predict when 50/100/150… will be crossed from cycleStart
+    function predictCrossings(cycleStart, avg, maxUnits=400, step=50){
+      const out = [];
+      if(avg <= 0) return out;
+      for(let k=step; k<=maxUnits; k+=step){
+        const daysNeeded = Math.ceil(k/avg);
+        const dt = new Date(cycleStart);
+        dt.setHours(0,0,0,0);
+        dt.setDate(dt.getDate() + daysNeeded - 1);
+        out.push({ threshold: k, date: formatDateISO(dt) });
+      }
+      return out;
+    }
+
+    // ====== UI actions ======
+    $("#btnClear").addEventListener("click", () => {
+      $("#files").value = "";
+      $("#preview").classList.add("hidden");
+      $("#tbody").innerHTML = "";
+      $("#predList").innerHTML = "";
+      $("#avgInfo").textContent = "";
+      $("#status").textContent = "";
+    });
+
+    $("#btnParse").addEventListener("click", async () => {
+      const input = $("#files");
+      const tbody = $("#tbody");
+      const preview = $("#preview");
+      const predList = $("#predList");
+      const avgInfo = $("#avgInfo");
+      const status = $("#status");
+      status.textContent = "";
+
+      if(!input.files.length){
+        alert("Please select at least one PDF or CSV bill.");
+        return;
+      }
+
+      let all = [];
+      for(const f of input.files){
+        try{
+          if(f.type === "application/pdf"){
+            const txt = await pdfToText(f);
+            all = all.concat(parseBillText(txt));
+          }else if(f.name.toLowerCase().endsWith(".csv")){
+            const text = await f.text();
+            all = all.concat(parseCSV(text));
+          }
+        }catch(e){
+          console.warn("Parse error for", f.name, e);
+        }
+      }
+
+      // Deduplicate by period end
+      const map = new Map();
+      for(const r of all){
+        if(r && r.end) map.set(String(r.end), r);
+      }
+      const rows = Array.from(map.values()).sort((a,b) => new Date(a.start) - new Date(b.start));
+
+      // Render editable table
+      tbody.innerHTML = "";
+      rows.forEach(r => {
+        const tr = document.createElement("tr");
+        tr.className = "border-b";
+        tr.innerHTML = `
+          <td class="border px-2 py-1"><input value="${r.start}" class="w-full px-2 py-1 border rounded"/></td>
+          <td class="border px-2 py-1"><input value="${r.end}" class="w-full px-2 py-1 border rounded"/></td>
+          <td class="border px-2 py-1"><input value="${r.units}" type="number" step="0.01" class="w-full px-2 py-1 border rounded"/></td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      // Compute avg + predictions
+      const hist = rows.map(r => ({ start: r.start, end: r.end, units: r.units }));
+      const avg = avgDaily(hist);
+      const cStart = $("#cycleStart").value || formatDateISO(new Date());
+      const preds = predictCrossings(cStart, avg, 400, 50);
+
+      avgInfo.textContent = (avg > 0)
+        ? `Estimated average daily use: ${avg.toFixed(2)} units/day`
+        : "Could not estimate — edit the table or add more bills.";
+      predList.innerHTML = preds.map(p => `<li>${p.threshold} units ≈ ${p.date}</li>`).join("");
+
+      preview.classList.toggle("hidden", rows.length === 0);
+    });
+
+    $("#btnRegister").addEventListener("click", async () => {
+      const status = $("#status");
+      const phone = $("#phone").value.trim();
+      const lang = $("#lang").value;
+      const channel = $("#channel").value;
+      const account = $("#account").value.trim();
+      const cycleStart = $("#cycleStart").value;
+      const consent = $("#consent").checked;
+
+      if(!/^[6-9]\d{9}$/.test(phone)) return toast(status, "Enter a valid 10-digit Indian mobile starting with 6/7/8/9", false);
+      if(!cycleStart) return toast(status, "Please choose cycle start date", false);
+      if(!consent) return toast(status, "Please accept consent", false);
+
+      // Read edited rows from table
+      const rows = $$("#tbody tr").map(tr => {
+        const [a,b,c] = tr.querySelectorAll("input");
+        return { start:a.value.trim(), end:b.value.trim(), units: parseFloat(c.value) };
+      }).filter(r => r.start && r.end && !Number.isNaN(r.units));
+
+      if(!rows.length) return toast(status, "No parsed history found. Upload and extract bills first.", false);
+
+      try{
+        const resp = await postJSON({
+          op: "registerHistory",
+          data: { phone, lang, channel, account, cycleStart, history: rows }
+        });
+        toast(status, "Alerts enabled (prediction mode). You can close this page.");
+      }catch(e){
+        toast(status, "Failed: " + e.message, false);
+      }
+    });
+  </script>
+</body>
+</html>
